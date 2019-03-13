@@ -2,6 +2,8 @@ package com.promactinfo.aliasagar.chatapplication;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -14,6 +16,10 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -28,14 +34,18 @@ public class AllUsersActivity extends AppCompatActivity {
     ArrayList<User> UserDetails;
     ArrayAdapter<String> UserList;
     ArrayAdapter<String> MessageList;
-
+    ArrayList<Message> messages;
+    ChatApplicationService CAS;
+    String token;
+    int userId=-1;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_all_users);
-        SharedPreferences sharedPreferences = getSharedPreferences(getPackageName() + "Token_File", Context.MODE_PRIVATE);
-        final ChatApplicationService CAS = ServiceBuilder.buildService(ChatApplicationService.class);
-        final String token = sharedPreferences.getString("token", "N/A");
+        messages=new ArrayList<>();
+        final SharedPreferences sharedPreferences = getSharedPreferences(getPackageName() + "Token_File", Context.MODE_PRIVATE);
+        CAS = ServiceBuilder.buildService(ChatApplicationService.class);
+        token = sharedPreferences.getString("token", "N/A");
         Call<List<User>> call = CAS.getAllUsers(token);
         AllUsers = (ListView) findViewById(R.id.user_list);
         UserMessages = (ListView) findViewById(R.id.messages);
@@ -61,37 +71,66 @@ public class AllUsersActivity extends AppCompatActivity {
         AllUsers.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                // Get the selected item text from ListView
                 int selectedItem = (int) parent.getItemIdAtPosition(position);
-                final int userId = UserDetails.get(selectedItem).getId();
-                //Toast.makeText(getApplicationContext(), userId + "", Toast.LENGTH_SHORT).show();
-                getMessages(CAS,userId,token);
-
+                userId = UserDetails.get(selectedItem).getId();
+                getMessages();
                 Button sendButton=(Button)findViewById(R.id.send_button);
                 final EditText message_content=(EditText)findViewById(R.id.editText2);
-                final Message message=new Message();
+                final Gson gson=new Gson();
+
+                SharedPreferences sp = getSharedPreferences(getPackageName() + "Messages", Context.MODE_PRIVATE);
+                String json=sp.getString("messages","null");
+                Type type = new TypeToken<ArrayList<Message>>() {}.getType();
+                ArrayList<Message> msgs = gson.fromJson(json,type);
+                if(msgs!=null) {
+                    for (int i = 0; i < msgs.size(); i++) {
+                        sendMsg(msgs.get(i));
+                    }
+                    msgs.clear();
+                    SharedPreferences.Editor editor = sp.edit();
+                    String jsons = gson.toJson(msgs);
+                    editor.putString("messages", jsons);
+                    editor.apply();
+                }
+
                 sendButton.setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View view) {
                         String text = message_content.getText().toString().trim();
-                        if(text.isEmpty()){
-                            Toast.makeText(getApplicationContext(),"Message should not empty.",Toast.LENGTH_LONG).show();
+                        Toast.makeText(getApplicationContext(), "online", Toast.LENGTH_SHORT).show();
+                        if (text.isEmpty()) {
+                            Toast.makeText(getApplicationContext(), "Message should not empty.", Toast.LENGTH_LONG).show();
                         }
-                        else{
+                        else {
+                            Message message=new Message();
                             message.setMessage(message_content.getText().toString());
                             message.setToUserId(userId);
-                            Call<Void> send_msg=CAS.sendMessage(message,token);
-                            send_msg.enqueue(new Callback<Void>() {
-                                @Override
-                                public void onResponse(Call<Void> call, Response<Void> response) {
-                                    Toast.makeText(getApplicationContext(), "Sent", Toast.LENGTH_SHORT).show();
-                                    getMessages(CAS,userId,token);
+                            if (isOnline()) {
+                                SharedPreferences sp = getSharedPreferences(getPackageName() + "Messages", Context.MODE_PRIVATE);
+                                String json=sp.getString("messages","null");
+                                Type type = new TypeToken<ArrayList<Message>>() {}.getType();
+                                ArrayList<Message> msgs = gson.fromJson(json,type);
+                                if(msgs!=null) {
+                                    for (int i = 0; i < msgs.size(); i++) {
+                                        sendMsg(msgs.get(i));
+                                    }
+                                    msgs.clear();
+                                    SharedPreferences.Editor editor = sp.edit();
+                                    String jsons = gson.toJson(msgs);
+                                    editor.putString("messages", jsons);
+                                    editor.apply();
                                 }
-                                @Override
-                                public void onFailure(Call<Void> call, Throwable t) {
-                                    Toast.makeText(getApplicationContext(), "Request Failed", Toast.LENGTH_SHORT).show();
-                                }
-                            });
+                                sendMsg(message);
+                            }
+                            else{
+                                Toast.makeText(getApplicationContext(), "offline", Toast.LENGTH_SHORT).show();
+                                SharedPreferences sp = getSharedPreferences(getPackageName() + "Messages", Context.MODE_PRIVATE);
+                                SharedPreferences.Editor editor=sp.edit();
+                                messages.add(message);
+                                String json=gson.toJson(messages);
+                                editor.putString("messages", json);
+                                editor.apply();
+                            }
                         }
                         message_content.setText("");
                     }
@@ -100,7 +139,22 @@ public class AllUsersActivity extends AppCompatActivity {
         });
     }
 
-    private void getMessages(ChatApplicationService CAS, int userId, String token) {
+    private void sendMsg(Message message) {
+        Call<Void> send_msg = CAS.sendMessage(message, token);
+        send_msg.enqueue(new Callback<Void>() {
+            @Override
+            public void onResponse(Call<Void> call, Response<Void> response) {
+                Toast.makeText(getApplicationContext(), "Sent", Toast.LENGTH_SHORT).show();
+                getMessages();
+            }
+            @Override
+            public void onFailure(Call<Void> call, Throwable t) {
+                Toast.makeText(getApplicationContext(), "Request Failed", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void getMessages() {
         Call<List<Message>> msg = CAS.getUserMessages(userId, token);
         msg.enqueue(new Callback<List<Message>>() {
             @Override
@@ -118,5 +172,14 @@ public class AllUsersActivity extends AppCompatActivity {
                 Toast.makeText(getApplicationContext(), "Request Failed", Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    public boolean isOnline() {
+        ConnectivityManager connectivityMgr = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo networkInfo = connectivityMgr.getActiveNetworkInfo();
+        if (networkInfo != null && networkInfo.isConnected()) {
+            return true;
+        }
+        return false;
     }
 }
