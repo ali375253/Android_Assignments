@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -38,10 +39,37 @@ public class AllUsersActivity extends AppCompatActivity {
     ChatApplicationService CAS;
     String token;
     int userId=-1;
+    int size=0;
+    Handler h = new Handler();
+    int delay = 1*1000; //1 second=1000 milisecond, 15*1000=15seconds
+    Runnable runnable;
+    @Override
+    protected void onResume() {
+        //start handler as activity become visible
+
+        h.postDelayed( runnable = new Runnable() {
+            public void run() {
+                //do something
+                getMessages();
+                h.postDelayed(runnable, delay);
+            }
+        }, delay);
+
+        super.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        h.removeCallbacks(runnable); //stop handler when activity not visible
+        super.onPause();
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_all_users);
+        //autoSync=new AutoSync();
+        //autoSync.onResume();
         messages=new ArrayList<>();
         final SharedPreferences sharedPreferences = getSharedPreferences(getPackageName() + "Token_File", Context.MODE_PRIVATE);
         CAS = ServiceBuilder.buildService(ChatApplicationService.class);
@@ -97,7 +125,7 @@ public class AllUsersActivity extends AppCompatActivity {
                     @Override
                     public void onClick(View view) {
                         String text = message_content.getText().toString().trim();
-                        Toast.makeText(getApplicationContext(), "online", Toast.LENGTH_SHORT).show();
+                        //Toast.makeText(getApplicationContext(), "online", Toast.LENGTH_SHORT).show();
                         if (text.isEmpty()) {
                             Toast.makeText(getApplicationContext(), "Message should not empty.", Toast.LENGTH_LONG).show();
                         }
@@ -123,7 +151,7 @@ public class AllUsersActivity extends AppCompatActivity {
                                 sendMsg(message);
                             }
                             else{
-                                Toast.makeText(getApplicationContext(), "offline", Toast.LENGTH_SHORT).show();
+                                Toast.makeText(getApplicationContext(), "You're offline, Message will send once you'll come online", Toast.LENGTH_LONG).show();
                                 SharedPreferences sp = getSharedPreferences(getPackageName() + "Messages", Context.MODE_PRIVATE);
                                 SharedPreferences.Editor editor=sp.edit();
                                 messages.add(message);
@@ -160,16 +188,22 @@ public class AllUsersActivity extends AppCompatActivity {
             @Override
             public void onResponse(Call<List<Message>> call, Response<List<Message>> response) {
                 String userMessages[] = new String[response.body().size()];
-                for (int i = 0; i < response.body().size(); i++) {
-                    userMessages[i] = response.body().get(i).getFromUserId() + " : " + response.body().get(i).getMessage();
+                if(userMessages.length!=size) {
+                    size=userMessages.length;
+                    for (int i = 0; i < response.body().size(); i++) {
+                        userMessages[i] = response.body().get(i).getFromUserId() + " : " + response.body().get(i).getMessage();
+                    }
+                    MessageList = new ArrayAdapter<String>(getApplicationContext(), android.R.layout.simple_list_item_1, userMessages);
+                    UserMessages.setAdapter(MessageList);
+                    if(size > 9) {
+                        UserMessages.setSelection(UserMessages.getAdapter().getCount() - 1);
+                    }
                 }
-                MessageList = new ArrayAdapter<String>(getApplicationContext(), android.R.layout.simple_list_item_1, userMessages);
-                UserMessages.setAdapter(MessageList);
             }
 
             @Override
             public void onFailure(Call<List<Message>> call, Throwable t) {
-                Toast.makeText(getApplicationContext(), "Request Failed", Toast.LENGTH_SHORT).show();
+                //Toast.makeText(getApplicationContext(), "Request Failed", Toast.LENGTH_SHORT).show();
             }
         });
     }
